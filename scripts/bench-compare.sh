@@ -273,7 +273,7 @@ in_allocs {
         pct = pct_str + 0
         if (pct > 0) {
             name = $1
-            printf "FAIL: %s allocs/op regression of +%s%%\n", name, pct_str
+            printf "WARNING: %s allocs/op regression of +%s%%\n", name, pct_str
             fail = 1
         }
     }
@@ -300,14 +300,14 @@ in_secop {
         name = $1
         if (tolower(name) == "geomean" || name == "geomean") {
             if (pct > 1.0) {
-                printf "FAIL: Geomean regression of %s%% exceeds 1%% threshold\n", pct_str
+                printf "WARNING: Geomean regression of %s%% exceeds 1%% automation threshold\n", pct_str
                 fail = 1
             } else {
-                printf "OK: Geomean delta %s%% within 1%% threshold\n", pct_str
+                printf "INFO: Geomean delta %s%% does not exceed the 1%% automation threshold\n", pct_str
             }
         } else {
             if (pct > 2.0) {
-                printf "FAIL: %s regression of %s%% exceeds 2%% threshold\n", name, pct_str
+                printf "WARNING: %s regression of %s%% exceeds 2%% automation threshold\n", name, pct_str
                 fail = 1
             }
         }
@@ -323,10 +323,10 @@ echo "$regression_output"
 
 if [ "$rc" -eq 0 ]; then
     echo ""
-    echo "All checks passed."
+    echo "No automated regression warnings found."
 else
     echo ""
-    echo "Regression checks failed."
+    echo "Automated regression warnings found."
 fi
 
 exit $rc
