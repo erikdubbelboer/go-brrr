@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: stable
 
       - name: Build C reference static library
         run: make lib/libbrotli_cref.a
@@ -30,10 +30,14 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     strategy:
+      fail-fast: false
       matrix:
+        go: ["", "oldstable", "stable"]
         tags: ["", "purego"]
-    name: test${{ matrix.tags && format(' ({0})', matrix.tags) || '' }}
+    name: test (${{ matrix.go || 'go.mod' }}${{ matrix.tags && format(', {0}', matrix.tags) || '' }})
     steps:
       - uses: actions/checkout@v6
         with:
@@ -41,7 +45,8 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go }}
+          go-version-file: ${{ matrix.go == '' && 'go.mod' || '' }}
 
       - name: Build C reference static library
         run: make lib/libbrotli_cref.a
