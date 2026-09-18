@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version-file: go.mod
 
       - name: Build C reference static library
         run: make lib/libbrotli_cref.a
