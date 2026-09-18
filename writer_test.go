@@ -678,3 +678,111 @@ func TestCompressInvalidLevel(t *testing.T) {
 		}
 	}
 }
+
+// TestWriterFlushPrefixIsDecodable checks the property Flush exists for: after
+// it returns, everything written so far must be recoverable from the bytes on
+// the wire, without waiting for Close.
+//
+// The other flush tests decode only after Close, which hides a stream that is
+// not byte-aligned at the flush point: Close emits the retained bits and the
+// full stream comes out correct. A streaming consumer — an HTTP client reading
+// a chunked response, say — never gets that far.
+//
+// This mirrors BROTLI_OPERATION_FLUSH in the reference encoder: "When flush is
+// complete, output data will be sufficient for decoder to reproduce all the
+// given input."
+func TestWriterFlushPrefixIsDecodable(t *testing.T) {
+	// Several shapes and sizes: how many bits are left pending at the flush
+	// point depends on the content, so a single payload can pass by luck.
+	payloads := map[string][]byte{
+		"repetitive": bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog. "), 300),
+		"json":       bytes.Repeat([]byte(`{"result":"0xdeadbeef","id":1},`), 400),
+		"short":      []byte("hello brotli"),
+		"binary": func() []byte {
+			b := make([]byte, 4096)
+			for i := range b {
+				b[i] = byte(i * 7)
+			}
+			return b
+		}(),
+	}
+
+	for _, level := range writerLevels {
+		for name, want := range payloads {
+			t.Run(fmt.Sprintf("quality_%d/%s", level, name), func(t *testing.T) {
+				var buf bytes.Buffer
+				w, err := NewWriter(&buf, level)
+				if err != nil {
+					t.Fatalf("NewWriter: %v", err)
+				}
+				if _, err := w.Write(want); err != nil {
+					t.Fatalf("Write: %v", err)
+				}
+				if err := w.Flush(); err != nil {
+					t.Fatalf("Flush: %v", err)
+				}
+
+				// Decode only what the flush put on the wire. The stream is
+				// unterminated, so a decoder reports a truncated input at the
+				// end; the bytes recovered before that are what matters.
+				flushed := append([]byte(nil), buf.Bytes()...)
+				got, _ := io.ReadAll(NewReader(bytes.NewReader(flushed)))
+				if !bytes.Equal(got, want) {
+					t.Errorf("flushed prefix decoded to %d of %d bytes", len(got), len(want))
+				}
+
+				// The stream must still finish correctly afterwards.
+				if err := w.Close(); err != nil {
+					t.Fatalf("Close: %v", err)
+				}
+				full := creftest.BrotliDecompress(t, buf.Bytes())
+				if !bytes.Equal(full, want) {
+					t.Errorf("after Close: got %d bytes, want %d", len(full), len(want))
+				}
+			})
+		}
+	}
+}
+
+// TestWriterRepeatedFlushIsDecodable covers a streaming writer that flushes
+// after every chunk, which is what an HTTP handler does.
+func TestWriterRepeatedFlushIsDecodable(t *testing.T) {
+	chunks := [][]byte{
+		[]byte(`{"jsonrpc":"2.0","id":1,"result":[`),
+		bytes.Repeat([]byte(`{"a":"0x0000000000000000000000000000000000000001"},`), 40),
+		bytes.Repeat([]byte(`{"b":"0xffffffffffffffffffffffffffffffffffffffff"},`), 40),
+		[]byte(`{"end":true}]}`),
+	}
+
+	for _, level := range writerLevels {
+		t.Run(fmt.Sprintf("quality_%d", level), func(t *testing.T) {
+			var buf bytes.Buffer
+			w, err := NewWriter(&buf, level)
+			if err != nil {
+				t.Fatalf("NewWriter: %v", err)
+			}
+			var want []byte
+			for i, c := range chunks {
+				if _, err := w.Write(c); err != nil {
+					t.Fatalf("Write chunk %d: %v", i, err)
+				}
+				if err := w.Flush(); err != nil {
+					t.Fatalf("Flush chunk %d: %v", i, err)
+				}
+				want = append(want, c...)
+
+				got, _ := io.ReadAll(NewReader(bytes.NewReader(buf.Bytes())))
+				if !bytes.Equal(got, want) {
+					t.Fatalf("after chunk %d: decoded %d of %d bytes", i, len(got), len(want))
+				}
+			}
+			if err := w.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			full := creftest.BrotliDecompress(t, buf.Bytes())
+			if !bytes.Equal(full, want) {
+				t.Errorf("after Close: got %d bytes, want %d", len(full), len(want))
+			}
+		})
+	}
+}
