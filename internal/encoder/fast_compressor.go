@@ -113,29 +113,6 @@ func (c *fastCompressor) Flush(dst io.Writer) error {
 	return c.padToByteBoundary(dst)
 }
 
-// padToByteBoundary flushes the pending sub-byte carry by appending an empty
-// metadata meta-block and zero-padding to the next byte boundary.
-//
-// The six header bits are ISLAST=0, MNIBBLES=3 (the metadata marker),
-// reserved=0, MSKIPBYTES=0 — the value 0x6 written LSB-first, which is what
-// InjectBytePaddingBlock emits in the reference encoder's encode.c. Decoders
-// skip metadata blocks, so the block costs at most two bytes and leaves the
-// stream ready to continue at a byte boundary.
-func (c *fastCompressor) padToByteBoundary(dst io.Writer) error {
-	if c.carryBits == 0 {
-		return nil
-	}
-	seal := uint32(c.carry) | 0x6<<c.carryBits
-	sealBits := c.carryBits + 6 // at most 7+6 = 13, so never more than 2 bytes
-	out := [2]byte{byte(seal), byte(seal >> 8)}
-	if _, err := dst.Write(out[:(sealBits+7)/8]); err != nil {
-		return err
-	}
-	c.carry = 0
-	c.carryBits = 0
-	return nil
-}
-
 // Close emits any remaining buffered input as the final meta-block, finalizing
 // the brotli stream.
 func (c *fastCompressor) Close(dst io.Writer) error {
@@ -264,6 +241,29 @@ func (c *fastCompressor) emitFragment(dst io.Writer, block []byte, isLast bool) 
 	// carryBits is 0.
 	c.carry = c.outBuf[n]
 	c.carryBits = b.bitOffset & 7
+	return nil
+}
+
+// padToByteBoundary flushes the pending sub-byte carry by appending an empty
+// metadata meta-block and zero-padding to the next byte boundary.
+//
+// The six header bits are ISLAST=0, MNIBBLES=3 (the metadata marker),
+// reserved=0, MSKIPBYTES=0 — the value 0x6 written LSB-first, which is what
+// InjectBytePaddingBlock emits in the reference encoder's encode.c. Decoders
+// skip metadata blocks, so the block costs at most two bytes and leaves the
+// stream ready to continue at a byte boundary.
+func (c *fastCompressor) padToByteBoundary(dst io.Writer) error {
+	if c.carryBits == 0 {
+		return nil
+	}
+	seal := uint32(c.carry) | 0x6<<c.carryBits
+	sealBits := c.carryBits + 6 // at most 7+6 = 13, so never more than 2 bytes
+	out := [2]byte{byte(seal), byte(seal >> 8)}
+	if _, err := dst.Write(out[:(sealBits+7)/8]); err != nil {
+		return err
+	}
+	c.carry = 0
+	c.carryBits = 0
 	return nil
 }
 
