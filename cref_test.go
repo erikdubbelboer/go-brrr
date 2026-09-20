@@ -526,6 +526,34 @@ func TestCompoundDictMatchesCRef(t *testing.T) {
 	}
 }
 
+func TestCompoundDictShortDictionaryMatchesCRef(t *testing.T) {
+	input := []byte("uick 00cove01")
+	dict := []byte("uick")
+	pd, err := PrepareDictionary(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	w, err := NewWriterOptions(&buf, 9, WriterOptions{
+		LGWin:        19,
+		SizeHint:     uint(len(input)),
+		Dictionaries: []*PreparedDictionary{pd},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(input); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := creftest.BrotliCompressDict(t, input, dict, 9, 19, uint(len(input)))
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("Go stream differs from C:\n got %x\nwant %x", buf.Bytes(), want)
+	}
+}
+
 // TestCompoundDictDecoderRoundtrip verifies that the Go decoder correctly
 // handles compound dictionary references across quality levels and window sizes.
 func TestCompoundDictDecoderRoundtrip(t *testing.T) {
