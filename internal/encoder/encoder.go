@@ -1204,7 +1204,7 @@ func (e *encoderSplit) writeMetaBlockSplit(length int, isLast bool) {
 		s.distAlphabetSizeLimit = uint(distParams.alphabetSizeLimit)
 		s.distParams = distParams
 		optimizeHistograms(&e.mb, int(s.distAlphabetSizeLimit), &e.goodForRLE)
-		e.writeMetaBlock(length, isLast, &e.mb, e.tree[:])
+		e.writeMetaBlock(length, isLast, contextMode, &e.mb, e.tree[:])
 		s.distParams = savedDistParams
 		s.distAlphabetSizeMax = savedDistMax
 		s.distAlphabetSizeLimit = savedDistLimit
@@ -1223,7 +1223,7 @@ func (e *encoderSplit) writeMetaBlockSplit(length int, isLast bool) {
 	buildMetaBlockGreedy(s.data, startPos, uint(s.mask), s.prevByte, s.prevByte2,
 		numContexts, staticContextMap, s.commands, &e.splitBufs, &e.mb)
 	optimizeHistograms(&e.mb, int(s.distAlphabetSizeMax), &e.goodForRLE)
-	e.writeMetaBlock(length, isLast, &e.mb, e.tree[:])
+	e.writeMetaBlock(length, isLast, core.ContextUTF8, &e.mb, e.tree[:])
 }
 
 // writeMetaBlock encodes commands into a compressed meta-block using the full
@@ -1242,7 +1242,7 @@ func (e *encoderSplit) writeMetaBlockSplit(length int, isLast bool) {
 // When a distance context map is present (Q10+ slow path), distance symbols
 // are encoded with storeSymbolWithContext using a 2-bit distance context.
 // Otherwise distance encoding uses trivial context maps.
-func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSplit, tree []huffmanTreeNode) {
+func (e *encoderSplit) writeMetaBlock(length int, isLast bool, contextMode byte, mb *metaBlockSplit, tree []huffmanTreeNode) {
 	s := &e.encodeState
 	b := &s.b
 	input := s.data
@@ -1271,15 +1271,8 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 	b.writeBits(2, uint64(npostfix))
 	b.writeBits(4, uint64(ndirect>>npostfix))
 
-	// Literal context modes (2 bits per literal block type).
-	// For Q10+ the mode is determined by chooseContextMode; for Q4–Q9 it
-	// is always UTF-8.
-	var literalContextMode byte = core.ContextUTF8
-	if s.quality >= 10 {
-		literalContextMode = chooseContextMode(s.quality, s.data, startPos, mask, uint(length))
-	}
 	for range mb.litSplit.numTypes {
-		b.writeBits(2, uint64(literalContextMode))
+		b.writeBits(2, uint64(contextMode))
 	}
 
 	// Literal context map: full encoding when context modeling is active,
@@ -1338,7 +1331,7 @@ func (e *encoderSplit) writeMetaBlock(length int, isLast bool, mb *metaBlockSpli
 		if useLitContextMap {
 			for j := cmd.insertLen; j != 0; j-- {
 				literal := input[pos&mask]
-				context := uint(core.ContextLookup(uint(literalContextMode), prevByte, prevByte2))
+				context := uint(core.ContextLookup(uint(contextMode), prevByte, prevByte2))
 				litEnc.storeSymbolWithContext(uint(literal), context,
 					mb.literalContextMap, core.LiteralContextBits, b)
 				prevByte2 = prevByte

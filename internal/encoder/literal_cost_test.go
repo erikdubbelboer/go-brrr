@@ -247,3 +247,10 @@ func BenchmarkEstimateBitCostsForLiteralsUTF8MultiByte256KiB(b *testing.B) {
 func BenchmarkEstimateBitCostsForLiteralsUTF8MixedAsciiAndMultiByte256KiB(b *testing.B) {
 	benchmarkLiteralCost(b, true, "mixed", literalCostBenchBytes)
 }
+
+func TestZeroHistogramCountCostsTheSameAsOneSoTheGuardInTheCostLoopsIsRedundant(t *testing.T) {
+	if fastLog2(0) != fastLog2(1) {
+		t.Fatalf("both cost loops now call fastLog2(histo) without the histo==0 guard, which is only equivalent while fastLog2(0)==fastLog2(1); got %v vs %v",
+			fastLog2(0), fastLog2(1))
+	}
+}

@@ -42,24 +42,50 @@ func utf8Position(last, c, clamp uint) uint {
 	return min(2, clamp)
 }
 
-// decideMultiByteStatsLevel determines whether to use 1-histogram (ASCII),
-// 2-histogram (2-byte UTF-8), or 3-histogram (3-byte UTF-8) modeling.
+func nonZeroASCIIRun(data []byte, pos, n uint) uint {
+	i := uint(0)
+	for ; i+8 <= n; i += 8 {
+		w := loadU64LE(data, pos+i)
+		if w&0x8080808080808080 != 0 || (w-0x0101010101010101)&^w&0x8080808080808080 != 0 {
+			break
+		}
+	}
+	for ; i < n; i++ {
+		if c := data[pos+i]; c == 0 || c >= 0x80 {
+			break
+		}
+	}
+	return i
+}
+
+func contiguousLimit(data []byte, mask uint) uint {
+	return min(uint(len(data)), mask+1)
+}
+
 func decideMultiByteStatsLevel(data []byte, pos, length, mask uint) uint {
-	var counts [3]uint
-	maxUTF8 := uint(1)
+	limit := contiguousLimit(data, mask)
+	multiByte := uint(0)
 	lastC := uint(0)
-	for i := range length {
-		c := uint(data[(pos+i)&mask])
-		counts[utf8Position(lastC, c, 2)]++
+	for i := uint(0); i < length; {
+		p := (pos + i) & mask
+		if p < limit {
+			if run := nonZeroASCIIRun(data, p, min(length-i, limit-p)); run > 0 {
+				lastC = uint(data[p+run-1])
+				i += run
+				continue
+			}
+		}
+		c := uint(data[p])
+		if utf8Position(lastC, c, 2) != 0 {
+			multiByte++
+			if multiByte >= 25 {
+				return 1
+			}
+		}
 		lastC = c
+		i++
 	}
-	if counts[2] < 500 {
-		maxUTF8 = 1
-	}
-	if counts[1]+counts[2] < 25 {
-		maxUTF8 = 0
-	}
-	return maxUTF8
+	return 0
 }
 
 // estimateBitCostsForLiteralsUTF8 estimates per-byte costs using a
@@ -95,44 +121,38 @@ func estimateBitCostsForLiteralsUTF8(data []byte, pos, length, mask uint, histog
 		cachedUTF8Log[k] = fastLog2(int(inWindowUTF8[k]))
 	}
 
+	var addPrev1, addPrev2 uint
+	if windowHalf < length {
+		addPrev1 = uint(data[(pos+windowHalf-1)&mask])
+		addPrev2 = uint(data[(pos+windowHalf-2)&mask])
+	}
+	var remPrev1, remPrev2 uint
+	var curPrev1, curPrev2 uint
+
 	// Compute bit costs with sliding window.
 	for i := range length {
 		if i >= windowHalf {
 			// Remove a byte in the past.
-			var c, lc uint
-			if i >= windowHalf+1 {
-				c = uint(data[(pos+i-windowHalf-1)&mask])
-			}
-			if i >= windowHalf+2 {
-				lc = uint(data[(pos+i-windowHalf-2)&mask])
-			}
-			utf8Pos2 := utf8Position(lc, c, maxUTF8)
-			histogram[256*utf8Pos2+uint(data[(pos+i-windowHalf)&mask])]--
+			utf8Pos2 := utf8Position(remPrev2, remPrev1, maxUTF8)
+			gone := uint(data[(pos+i-windowHalf)&mask])
+			histogram[256*utf8Pos2+gone]--
 			inWindowUTF8[utf8Pos2]--
+			remPrev2, remPrev1 = remPrev1, gone
 		}
 		if i+windowHalf < length {
 			// Add a byte in the future.
-			c := uint(data[(pos+i+windowHalf-1)&mask])
-			lc := uint(data[(pos+i+windowHalf-2)&mask])
-			utf8Pos2 := utf8Position(lc, c, maxUTF8)
-			histogram[256*utf8Pos2+uint(data[(pos+i+windowHalf)&mask])]++
+			utf8Pos2 := utf8Position(addPrev2, addPrev1, maxUTF8)
+			added := uint(data[(pos+i+windowHalf)&mask])
+			histogram[256*utf8Pos2+added]++
 			inWindowUTF8[utf8Pos2]++
+			addPrev2, addPrev1 = addPrev1, added
 		}
 
-		var c uint
-		if i >= 1 {
-			c = uint(data[(pos+i-1)&mask])
-		}
-		var lc uint
-		if i >= 2 {
-			lc = uint(data[(pos+i-2)&mask])
-		}
-		curUTF8Pos := utf8Position(lc, c, maxUTF8)
+		curUTF8Pos := utf8Position(curPrev2, curPrev1, maxUTF8)
 		maskedPos := (pos + i) & mask
-		histo := histogram[256*curUTF8Pos+uint(data[maskedPos])]
-		if histo == 0 {
-			histo = 1
-		}
+		cur := uint(data[maskedPos])
+		curPrev2, curPrev1 = curPrev1, cur
+		histo := histogram[256*curUTF8Pos+cur]
 		if cachedUTF8Count[curUTF8Pos] != inWindowUTF8[curUTF8Pos] {
 			cachedUTF8Count[curUTF8Pos] = inWindowUTF8[curUTF8Pos]
 			cachedUTF8Log[curUTF8Pos] = fastLog2(int(inWindowUTF8[curUTF8Pos]))
@@ -183,9 +203,6 @@ func estimateBitCostsForLiteralsRaw(data []byte, pos, length, mask uint, histogr
 			inWindow++
 		}
 		histo := histogram[data[(pos+i)&mask]]
-		if histo == 0 {
-			histo = 1
-		}
 		if inWindow != cachedInWindow {
 			cachedInWindow = inWindow
 			cachedLog = fastLog2(int(inWindow))
@@ -202,10 +219,19 @@ func estimateBitCostsForLiteralsRaw(data []byte, pos, length, mask uint, histogr
 // isMostlyUTF8 returns true if at least minFraction of the data bytes form
 // valid UTF-8 sequences.
 func isMostlyUTF8(data []byte, pos, mask, length uint, minFraction float64) bool {
+	limit := contiguousLimit(data, mask)
 	sizeUTF8 := uint(0)
 	i := uint(0)
 	for i < length {
-		bytesRead, isUTF8 := parseAsUTF8(data, (pos+i)&mask, length-i, mask)
+		p := (pos + i) & mask
+		if p < limit {
+			if run := nonZeroASCIIRun(data, p, min(length-i, limit-p)); run > 0 {
+				sizeUTF8 += run
+				i += run
+				continue
+			}
+		}
+		bytesRead, isUTF8 := parseAsUTF8(data, p, length-i, mask)
 		i += bytesRead
 		if isUTF8 {
 			sizeUTF8 += bytesRead
