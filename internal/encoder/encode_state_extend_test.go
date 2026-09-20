@@ -68,6 +68,21 @@ func extendMatchFixture(tb testing.TB, period int) (data []byte, mask uint32) {
 	return data, uint32(n - 1)
 }
 
+func extendMatchViaEncodeState(data []byte, length, wrappedPos, mask, cmdDist uint32) uint32 {
+	const startCopyLen = 4
+	s := &encodeState{
+		data:             data,
+		mask:             mask,
+		lgwin:            24,
+		lastProcessedPos: uint64(mask) + 1,
+		commands:         []command{newCommandSimpleDist(0, startCopyLen, 0, 0)},
+		numCommands:      1,
+	}
+	s.distCache[0] = uint(cmdDist)
+	s.extendLastCommand(length, wrappedPos)
+	return s.commands[0].copyLength() - startCopyLen
+}
+
 func TestExtendMatchWideCompareAgreesWithTheByteLoop(t *testing.T) {
 	for _, period := range []int{1, 2, 3, 7, 16, 61, 256} {
 		data, mask := extendMatchFixture(t, period)
@@ -81,6 +96,7 @@ func TestExtendMatchWideCompareAgreesWithTheByteLoop(t *testing.T) {
 					}{
 						{"matchLenAt", extendMatchAfter},
 						{"matchLenAtLong", extendMatchBlocked},
+						{"extendLastCommand", extendMatchViaEncodeState},
 					} {
 						if got := impl.fn(data, length, pos, mask, dist); got != want {
 							t.Fatalf("%s: period=%d dist=%d length=%d pos=%d: extended %d bytes, "+
