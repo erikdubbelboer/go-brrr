@@ -229,7 +229,7 @@ func buildMetaBlock(
 // metablock builder. For Q10+ data that is mostly UTF-8, core.ContextUTF8 is
 // used; otherwise core.ContextSigned is selected.
 func chooseContextMode(quality int, data []byte, pos, mask, length uint) byte {
-	if quality >= 10 && !isMostlyUTF8(data, pos, mask, length, minUTF8Ratio) {
+	if quality >= 10 && !isMostlyUTF8(data, pos, mask, length) {
 		return core.ContextSigned
 	}
 	return core.ContextUTF8

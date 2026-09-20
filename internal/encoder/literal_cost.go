@@ -19,7 +19,7 @@ package encoder
 // The histogram parameter is scratch space: 3*256 entries for the UTF-8
 // path, or 256 entries for the non-UTF-8 path.
 func estimateBitCostsForLiterals(data []byte, position, numBytes, ringBufferMask uint, histogram []uint, cost []float32) {
-	if isMostlyUTF8(data, position, ringBufferMask, numBytes, minUTF8Ratio) {
+	if isMostlyUTF8(data, position, ringBufferMask, numBytes) {
 		estimateBitCostsForLiteralsUTF8(data, position, numBytes, ringBufferMask, histogram, cost)
 	} else {
 		estimateBitCostsForLiteralsRaw(data, position, numBytes, ringBufferMask, histogram, cost)
@@ -216,9 +216,9 @@ func estimateBitCostsForLiteralsRaw(data []byte, pos, length, mask uint, histogr
 	}
 }
 
-// isMostlyUTF8 returns true if at least minFraction of the data bytes form
+// isMostlyUTF8 returns true if at least minUTF8Ratio of the data bytes form
 // valid UTF-8 sequences.
-func isMostlyUTF8(data []byte, pos, mask, length uint, minFraction float64) bool {
+func isMostlyUTF8(data []byte, pos, mask, length uint) bool {
 	limit := contiguousLimit(data, mask)
 	sizeUTF8 := uint(0)
 	i := uint(0)
@@ -237,7 +237,7 @@ func isMostlyUTF8(data []byte, pos, mask, length uint, minFraction float64) bool
 			sizeUTF8 += bytesRead
 		}
 	}
-	return float64(sizeUTF8) > minFraction*float64(length)
+	return float64(sizeUTF8) > minUTF8Ratio*float64(length)
 }
 
 // parseAsUTF8 attempts to parse a UTF-8 sequence starting at data[pos].

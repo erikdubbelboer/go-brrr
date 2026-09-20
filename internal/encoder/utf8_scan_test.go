@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func isMostlyUTF8Before(data []byte, pos, mask, length uint, minFraction float64) bool {
+func isMostlyUTF8Before(data []byte, pos, mask, length uint) bool {
 	sizeUTF8 := uint(0)
 	i := uint(0)
 	for i < length {
@@ -16,7 +16,7 @@ func isMostlyUTF8Before(data []byte, pos, mask, length uint, minFraction float64
 			sizeUTF8 += bytesRead
 		}
 	}
-	return float64(sizeUTF8) > minFraction*float64(length)
+	return float64(sizeUTF8) > minUTF8Ratio*float64(length)
 }
 
 func decideMultiByteStatsLevelBefore(data []byte, pos, length, mask uint) uint {
@@ -107,8 +107,8 @@ func TestIsMostlyUTF8MatchesPerPositionParsingForEveryFixtureLengthAndWrapOffset
 				continue
 			}
 			for _, pos := range []uint{0, 1, 7, uint(len(data)) / 2, uint(len(data)) - 3} {
-				want := isMostlyUTF8Before(data, pos, mask, length, minUTF8Ratio)
-				got := isMostlyUTF8(data, pos, mask, length, minUTF8Ratio)
+				want := isMostlyUTF8Before(data, pos, mask, length)
+				got := isMostlyUTF8(data, pos, mask, length)
 				if got != want {
 					errs = append(errs, fmt.Errorf(
 						"the eight-byte ASCII skip changed the UTF-8 verdict, which selects the whole cost model: fixture=%s pos=%d length=%d got=%v want=%v",

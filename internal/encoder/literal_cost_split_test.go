@@ -10,35 +10,35 @@ var (
 	literalCostUintSink uint
 )
 
-func literalCostRealData(tb testing.TB, path string, n int) []byte {
-	tb.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	if len(data) < n {
-		tb.Fatalf("%s holds %d bytes, the benchmark name promises %d", path, len(data), n)
-	}
-	return data[:n]
-}
-
 const (
 	splitN    = 128 << 10
 	splitHTML = "../../testdata/gh_172KB.html"
 	splitJS   = "../../testdata/reactcore_187KB.js"
 )
 
+func literalCostRealData(tb testing.TB, path string) []byte {
+	tb.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	if len(data) < splitN {
+		tb.Fatalf("%s holds %d bytes, the benchmark name promises %d", path, len(data), splitN)
+	}
+	return data[:splitN]
+}
+
 func benchmarkIsMostlyUTF8(b *testing.B, path string) {
-	data := literalCostRealData(b, path, splitN)
+	data := literalCostRealData(b, path)
 	b.ReportAllocs()
 	b.SetBytes(int64(splitN))
 	for range b.N {
-		literalCostBoolSink = isMostlyUTF8(data, 0, uint(splitN-1), uint(splitN), minUTF8Ratio)
+		literalCostBoolSink = isMostlyUTF8(data, 0, uint(splitN-1), uint(splitN))
 	}
 }
 
 func benchmarkDecideMultiByteStatsLevel(b *testing.B, path string) {
-	data := literalCostRealData(b, path, splitN)
+	data := literalCostRealData(b, path)
 	b.ReportAllocs()
 	b.SetBytes(int64(splitN))
 	for range b.N {
@@ -47,7 +47,7 @@ func benchmarkDecideMultiByteStatsLevel(b *testing.B, path string) {
 }
 
 func benchmarkEstimateUTF8Only(b *testing.B, path string) {
-	data := literalCostRealData(b, path, splitN)
+	data := literalCostRealData(b, path)
 	histogram, cost := literalCostBuffers(splitN)
 	b.ReportAllocs()
 	b.SetBytes(int64(splitN))
@@ -58,7 +58,7 @@ func benchmarkEstimateUTF8Only(b *testing.B, path string) {
 }
 
 func benchmarkEstimateDispatch(b *testing.B, path string) {
-	data := literalCostRealData(b, path, splitN)
+	data := literalCostRealData(b, path)
 	histogram, cost := literalCostBuffers(splitN)
 	b.ReportAllocs()
 	b.SetBytes(int64(splitN))
